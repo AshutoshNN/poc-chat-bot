@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { ThreeDots } from "react-loader-spinner";
 import { useVoiceAssistant } from "./hooks/useVoiceAssistant";
 import "./App.css";
@@ -17,6 +17,10 @@ export default function App() {
     stopAssistant,
     toggleMute,
   } = useVoiceAssistant();
+  
+  useEffect(()=>{
+    console.log("New deployement 1.1")
+  },[]);
 
   return (
     <div className="app-container">
