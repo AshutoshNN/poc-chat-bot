@@ -1,0 +1,72 @@
+{
+  "response": [
+    {
+      "id": 1,
+      "message": "Hello",
+      "text": "Hi, I'm CERA, Welcome to the Ceramic Metaverse showroom!"
+    },
+    {
+      "id": 2,
+      "message": "AI Choose for me",
+      "text": "Help me understand your persona — are you a master tiler, architect, or consultant at the showroom?"
+    },
+    {
+      "id": 3,
+      "message": "I need 720",
+      "text": "We have 1,200 m² of Walden Beige 20×120 cm (item no. 430686) available in our Schwarzenfeld warehouse. Would you like me to check whether the entire quantity is from the same batch (same firing)?"
+    },
+    {
+      "id": 4,
+      "message": "pattern",
+      "text": "Yes, the current quantity comes from one batch. Would you like me to reserve 720 m² for 5 days?"
+    },
+    {
+      "id": 5,
+      "message": "available with r11",
+      "text": "R11/B can be offered as a special production, but only for a minimum quantity of 1000 m². Should I send an enquiry to product management?",
+      "clickableText": "The standard is R10/A+B "
+    },
+    {
+      "id": 6,
+      "message": "no r10 is sufficient",
+      "text": "For a wood look,  we recommend basic cleaning after installation with a neutral cleaner, followed by normal maintenance cleaning – no waxes or coatings.",
+      "clickableText": " I am attaching the care instructions as a PDF"
+    },
+    {
+      "id": 7,
+      "message": "can you send me the quote",
+      "text": "Of course – the offer for 720 m² of Walden Beige 20×120 cm (item no. 430686) will be automatically sent tomustermann@fliesenleger.de ."
+    },
+    {
+      "id": 8,
+      "message": "ai choose for me",
+      "text": "Can you help me understand your persona ?"
+    },
+    {
+      "id": 9,
+      "message": "master",
+      "text": "How can I Assist You ?"
+    },
+    {
+      "id": 10,
+      "message": "product",
+      "text": "How can I Assist You ?",
+      "navigate": "/product-search"
+    },
+    {
+      "id": 11,
+      "message": "cleaning",
+      "text": "I can definitely assist you with cleaning guidelines, Please ask or type your question."
+    },
+    {
+      "id": 12,
+      "message": "close",
+      "text": "Okay"
+    },
+    {
+      "id": 13,
+      "message": "bye",
+      "text": "Goodbye! Talk to you later. "
+    }
+  ]
+}
