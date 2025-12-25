@@ -19,7 +19,7 @@ export default function App() {
   } = useVoiceAssistant();
   
   useEffect(()=>{
-    console.log("New deployement 1.1")
+    console.log("New deployement 2.1")
   },[]);
 
   return (
