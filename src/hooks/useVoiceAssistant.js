@@ -22,6 +22,11 @@ export function useVoiceAssistant() {
   const [transcript, setTranscript] = useState("");
   const [listening, setListening] = useState(false);
 
+  const isIOS =
+  typeof window !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !window.MSStream;
+
   // -------------------- SUPPORT CHECK --------------------
   const browserSupportsSpeechRecognition =
     typeof window !== "undefined" &&
@@ -110,6 +115,8 @@ export function useVoiceAssistant() {
 
   // -------------------- SILENCE + INTERRUPTION LOGIC --------------------
   useEffect(() => {
+    if (isIOS) return; // iOS does NOT support live interruption
+
     if (!started || !transcript) return;
 
     clearTimeout(silenceTimer.current);
@@ -201,14 +208,50 @@ export function useVoiceAssistant() {
   };
 
   // -------------------- SPEAK --------------------
-  const speak = (text) => {
+  const speak = async (text) => {
     if (muted) return;
-
+  
+    // iOS SAFARI FIX: single utterance only
+    if (isIOS) {
+      speechSynthesis.cancel();
+  
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 0.95;
+      utter.pitch = 1;
+      utter.volume = 1;
+  
+      isSpeakingRef.current = true;
+      setState("speaking");
+  
+      utter.onend = () => {
+        isSpeakingRef.current = false;
+        setState("listening");
+        isProcessingRef.current = false;
+  
+        // resume mic AFTER speech ends
+        setTimeout(() => {
+          safeStartRecognition();
+        }, 300);
+      };
+  
+      utter.onerror = () => {
+        isSpeakingRef.current = false;
+        setState("listening");
+        isProcessingRef.current = false;
+        safeStartRecognition();
+      };
+  
+      speechSynthesis.speak(utter);
+      return;
+    }
+  
+    // ---------------- DESKTOP BEHAVIOR ----------------
+    // sentence-by-sentence is SAFE on Chrome/Edge
     sentenceQueueRef.current = text.split(/(?<=[.!?])\s+/);
     sentenceIndexRef.current = 0;
     speakNextSentence();
   };
-
+  
   const speakNextSentence = () => {
     if (muted) return;
 
