@@ -1,463 +1,256 @@
-import { useEffect, useRef, useState } from "react";
-import SpeechRecognition, {
-  useSpeechRecognition,
-} from "react-speech-recognition";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export function useVoiceAssistant() {
+  // -------------------- REFS --------------------
   const silenceTimer = useRef(null);
+  const recognitionRef = useRef(null);
+
+  const isRecognitionRunningRef = useRef(false);
   const isProcessingRef = useRef(false);
-  const lastTranscriptRef = useRef("");
   const isSpeakingRef = useRef(false);
+
+  const lastTranscriptRef = useRef("");
   const sentenceQueueRef = useRef([]);
   const sentenceIndexRef = useRef(0);
   const apiResponsesRef = useRef([]);
 
+  // -------------------- STATE --------------------
   const [started, setStarted] = useState(false);
   const [state, setState] = useState("idle");
-  const [aiText, setAiText] = useState("");
   const [conversation, setConversation] = useState([]);
   const [muted, setMuted] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [listening, setListening] = useState(false);
 
-  const {
-    transcript,
-    listening,
-    resetTranscript,
-    browserSupportsSpeechRecognition,
-  } = useSpeechRecognition();
+  // -------------------- SUPPORT CHECK --------------------
+  const browserSupportsSpeechRecognition =
+    typeof window !== "undefined" &&
+    (window.SpeechRecognition || window.webkitSpeechRecognition);
 
-  const loadVoices = () =>
-    new Promise((resolve) => {
-      const voices = speechSynthesis.getVoices();
-      if (voices.length) resolve(voices);
-      speechSynthesis.onvoiceschanged = () =>
-        resolve(speechSynthesis.getVoices());
-    });
+  // -------------------- SAFE MIC CONTROL --------------------
+  const safeStartRecognition = () => {
+    if (!recognitionRef.current) return;
+    if (isRecognitionRunningRef.current) return;
 
-  // Load API responses on mount
-  useEffect(() => {
-    const loadApiResponses = async () => {
-      try {
-        const response = await fetch("https://metaverse.thecivit.com/mk/response", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
+    try {
+      recognitionRef.current.start();
+    } catch (e) {
+      console.warn("⚠️ start ignored:", e.message);
+    }
+  };
 
-        if (response.ok) {
-          const data = await response.json();
-          apiResponsesRef.current = data.response || data;
-          console.log("✅ Loaded API responses:", apiResponsesRef.current.length);
+  const safeStopRecognition = () => {
+    if (!recognitionRef.current) return;
+    if (!isRecognitionRunningRef.current) return;
+
+    recognitionRef.current.stop();
+  };
+
+  // -------------------- INIT SPEECH RECOGNITION --------------------
+  const initSpeechRecognition = useCallback(() => {
+    if (!browserSupportsSpeechRecognition) return;
+
+    const SpeechRecognitionAPI =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onstart = () => {
+      isRecognitionRunningRef.current = true;
+      setListening(true);
+      console.log("🎤 Mic started");
+    };
+
+    recognition.onend = () => {
+      isRecognitionRunningRef.current = false;
+      setListening(false);
+      console.log("🎤 Mic stopped");
+    };
+
+    recognition.onerror = (e) => {
+      isRecognitionRunningRef.current = false;
+      setListening(false);
+      console.error("🎤 Mic error:", e.error);
+    };
+
+    recognition.onresult = (event) => {
+      let finalText = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalText += event.results[i][0].transcript;
         }
-      } catch (error) {
-        console.error("Failed to load API responses:", error);
+      }
+
+      if (finalText) {
+        setTranscript((prev) => prev + finalText);
       }
     };
 
-    loadApiResponses();
+    recognitionRef.current = recognition;
+  }, [browserSupportsSpeechRecognition]);
+
+  // -------------------- INIT ON MOUNT --------------------
+  useEffect(() => {
+    initSpeechRecognition();
+  }, [initSpeechRecognition]);
+
+  // -------------------- LOAD STATIC RESPONSES --------------------
+  useEffect(() => {
+    fetch("https://metaverse.thecivit.com/mk/response")
+      .then((r) => r.json())
+      .then((d) => {
+        apiResponsesRef.current = d.response || d;
+      })
+      .catch(console.error);
   }, []);
 
-  // Enhanced matching algorithm with word-level matching
-  const findBestMatch = (userInput, responses) => {
-    const normalizedInput = userInput.toLowerCase().trim();
-    const inputWords = normalizedInput.split(/\s+/).filter(w => w.length > 0);
-
-    // 1. Try exact match first
-    let match = responses.find(item =>
-      item.message.toLowerCase().trim() === normalizedInput
-    );
-    if (match) return match;
-
-    // 2. Try exact phrase match (case insensitive)
-    match = responses.find(item =>
-      normalizedInput.includes(item.message.toLowerCase()) ||
-      item.message.toLowerCase().includes(normalizedInput)
-    );
-    if (match) return match;
-
-    // 3. Word-level matching - find response with most matching words
-    let bestMatch = null;
-    let maxMatchScore = 0;
-
-    for (const item of responses) {
-      const messageWords = item.message.toLowerCase().split(/\s+/).filter(w => w.length > 0);
-
-      // Count matching words
-      let matchCount = 0;
-      for (const msgWord of messageWords) {
-        if (inputWords.some(inputWord =>
-          inputWord.includes(msgWord) || msgWord.includes(inputWord)
-        )) {
-          matchCount++;
-        }
-      }
-
-      // Calculate match score (percentage of message words that matched)
-      const matchScore = messageWords.length > 0 ? matchCount / messageWords.length : 0;
-
-      if (matchScore > maxMatchScore && matchCount > 0) {
-        maxMatchScore = matchScore;
-        bestMatch = item;
-      }
-    }
-
-    // 4. If we found a good word match (at least 50% of words match), use it
-    if (bestMatch && maxMatchScore >= 0.5) {
-      return bestMatch;
-    }
-
-    // 5. Fallback to first response or default message
-    return responses[0] || null;
-  };
-
-  // CRITICAL: Handle interruptions and silence detection
+  // -------------------- SILENCE + INTERRUPTION LOGIC --------------------
   useEffect(() => {
-    if (!browserSupportsSpeechRecognition) {
-      alert("Browser doesn't support speech recognition.");
-      return;
-    }
+    if (!started || !transcript) return;
 
-    if (transcript && started && transcript.length > 3) {
-      // SCENARIO 1: User interrupts while bot is speaking
-      if (isSpeakingRef.current && transcript !== lastTranscriptRef.current) {
-        console.log("🚨 INTERRUPTION DETECTED:", transcript);
+    clearTimeout(silenceTimer.current);
 
-        // Stop speaking immediately
-        speechSynthesis.cancel();
-        isSpeakingRef.current = false;
-        setState("listening");
-
-        // Clear silence timer
-        clearTimeout(silenceTimer.current);
-
-        // Process the interruption after short delay
-        silenceTimer.current = setTimeout(() => {
-          if (transcript && !isProcessingRef.current) {
-            console.log("📝 Processing interruption:", transcript);
-            lastTranscriptRef.current = transcript;
-            isProcessingRef.current = true;
-            askAI(transcript);
-            resetTranscript();
-          }
-        }, 1000);
-
-        return;
+    silenceTimer.current = setTimeout(() => {
+      if (
+        transcript &&
+        transcript !== lastTranscriptRef.current &&
+        !isProcessingRef.current
+      ) {
+        lastTranscriptRef.current = transcript;
+        isProcessingRef.current = true;
+        askAI(transcript);
+        setTranscript("");
       }
+    }, 1500);
+  }, [transcript, started]);
 
-      // Normal silence detection when NOT being interrupted
-      clearTimeout(silenceTimer.current);
-
-      silenceTimer.current = setTimeout(() => {
-        if (
-          transcript &&
-          transcript !== lastTranscriptRef.current &&
-          !isProcessingRef.current
-        ) {
-          console.log("💬 Normal input detected:", transcript);
-          lastTranscriptRef.current = transcript;
-          isProcessingRef.current = true;
-          askAI(transcript);
-          resetTranscript();
-        }
-      }, 1500);
-    }
-  }, [transcript, started, browserSupportsSpeechRecognition]);
-
-  // Keep microphone ALWAYS active when started
+  // -------------------- KEEP MIC ALIVE --------------------
   useEffect(() => {
-    if (started && !listening && !isProcessingRef.current) {
-      console.log("🎤 Ensuring microphone is active");
-      SpeechRecognition.startListening({
-        continuous: true,
-        language: "en-US",
-      });
+    if (started && !isProcessingRef.current) {
+      safeStartRecognition();
     }
-  }, [started, listening, state]);
+  }, [started, state]);
 
+  // -------------------- START / STOP --------------------
   const startAssistant = () => {
     setStarted(true);
     setState("listening");
     lastTranscriptRef.current = "";
     isProcessingRef.current = false;
-    resetTranscript();
-    SpeechRecognition.startListening({
-      continuous: true,
-      language: "en-US",
-    });
+    setTranscript("");
+    safeStartRecognition();
   };
 
   const stopAssistant = () => {
     setStarted(false);
     setState("idle");
     speechSynthesis.cancel();
-    isProcessingRef.current = false;
     isSpeakingRef.current = false;
+    isProcessingRef.current = false;
     clearTimeout(silenceTimer.current);
-    SpeechRecognition.stopListening();
+    safeStopRecognition();
   };
 
-  // SCENARIO 2: Mute/Unmute handling
+  // -------------------- MUTE --------------------
   const toggleMute = () => {
-    setMuted((prev) => {
-      const next = !prev;
-
-      if (next) {
-        // 🔇 MUTING: Stop speaking but KEEP LISTENING
-        console.log("🔇 MUTED - Stopping speech, keeping mic active");
-
-        if (isSpeakingRef.current) {
-          speechSynthesis.cancel();
-          isSpeakingRef.current = false;
-          setState("listening");
-        }
-
-        // CRITICAL: Keep microphone active even when muted
-        if (started && !listening) {
-          console.log("🎤 Restarting mic in muted mode");
-          SpeechRecognition.startListening({
-            continuous: true,
-            language: "en-US",
-          });
-        }
-      } else {
-        // 🔊 UNMUTED: Resume normal operation
-        console.log("🔊 UNMUTED - Interruptions enabled again");
-        // Interruption will work automatically via useEffect
+    setMuted((m) => {
+      if (!m) {
+        speechSynthesis.cancel();
+        isSpeakingRef.current = false;
+        setState("listening");
+        safeStartRecognition();
       }
-
-      return next;
+      return !m;
     });
   };
 
+  // -------------------- MATCH RESPONSE --------------------
+  const findBestMatch = (input, responses) => {
+    const text = input.toLowerCase();
+    return responses.find((r) => text.includes(r.message.toLowerCase())) || responses[0];
+  };
+
+  // -------------------- ASK AI --------------------
   const askAI = async (text) => {
     setState("thinking");
-    setAiText("");
+    safeStopRecognition();
 
-    // Stop listening temporarily during API processing
-    SpeechRecognition.stopListening();
+    const responses = apiResponsesRef.current || [];
+    const match = findBestMatch(text, responses);
 
-    const newConversation = [...conversation, { role: "user", content: text }];
+    const reply =
+      match?.text || "I'm sorry, could you please repeat that?";
 
-    try {
-      // Use pre-loaded responses
-      const responses = apiResponsesRef.current;
+    setConversation((c) => [
+      ...c,
+      { role: "user", content: text },
+      { role: "assistant", content: reply },
+    ]);
 
-      if (!responses || responses.length === 0) {
-        throw new Error("No API responses available");
-      }
-
-      // Use enhanced matching algorithm
-      const matchedResponse = findBestMatch(text, responses);
-
-      const fullResponse = matchedResponse
-        ? matchedResponse.text
-        : "I'm sorry, I didn't understand that. Could you please rephrase?";
-
-      console.log("✅ Matched:", matchedResponse?.message, "→", fullResponse);
-
-      // Update conversation
-      setConversation([
-        ...newConversation,
-        { role: "assistant", content: fullResponse },
-      ]);
-
-      setAiText("");
-
-      // Check mute status - speak only if NOT muted
-      if (!muted) {
-        speak(fullResponse);
-      } else {
-        // If muted, just show in chat and resume listening
-        console.log("🔇 Muted - text only, resuming listening");
-        setState("listening");
-
-        // Resume listening immediately
-        setTimeout(() => {
-          if (started) {
-            SpeechRecognition.startListening({
-              continuous: true,
-              language: "en-US",
-            });
-          }
-        }, 100);
-      }
-
+    if (!muted) {
+      speak(reply);
+    } else {
+      setState("listening");
       isProcessingRef.current = false;
-    } catch (error) {
-      console.error("API Error:", error);
-      const errorMsg = "I couldn't process your request. Please try again.";
-
-      setConversation([
-        ...newConversation,
-        { role: "assistant", content: errorMsg },
-      ]);
-      setAiText("");
-
-      // Respect mute for errors too
-      if (!muted) {
-        speak(errorMsg);
-      } else {
-        setState("listening");
-        setTimeout(() => {
-          if (started) {
-            SpeechRecognition.startListening({
-              continuous: true,
-              language: "en-US",
-            });
-          }
-        }, 100);
-      }
-
-      isProcessingRef.current = false;
+      safeStartRecognition();
     }
   };
 
-  const speak = async (text) => {
-    // If muted, skip speaking entirely
-    if (muted) {
-      setState("listening");
-      isSpeakingRef.current = false;
+  // -------------------- SPEAK --------------------
+  const speak = (text) => {
+    if (muted) return;
 
-      // Resume listening
-      if (started) {
-        setTimeout(() => {
-          SpeechRecognition.startListening({
-            continuous: true,
-            language: "en-US",
-          });
-        }, 100);
-      }
-      return;
-    }
-
-    // Prepare sentence queue
-    const cleanText = text
-      .replace(/[*_`#]/g, "")
-      .replace(/\(.+?\)/g, "")
-      .trim()
-      .slice(0, 500);
-
-    sentenceQueueRef.current = cleanText.split(/(?<=[.!?])\s+/);
+    sentenceQueueRef.current = text.split(/(?<=[.!?])\s+/);
     sentenceIndexRef.current = 0;
-
     speakNextSentence();
   };
 
-  const speakNextSentence = async () => {
-    // ALWAYS check mute status - stop if muted
-    if (muted) {
-      console.log("🔇 Muted detected - stopping speech");
-      isSpeakingRef.current = false;
-      setState("listening");
+  const speakNextSentence = () => {
+    if (muted) return;
 
-      // Keep listening even when muted
-      if (started) {
-        setTimeout(() => {
-          SpeechRecognition.startListening({
-            continuous: true,
-            language: "en-US",
-          });
-        }, 100);
-      }
-      return;
-    }
-
-    const index = sentenceIndexRef.current;
     const sentences = sentenceQueueRef.current;
+    const index = sentenceIndexRef.current;
 
-    // CRITICAL: Ensure mic is ON during speaking for interruption detection
-    if (started && !listening) {
-      console.log("🎤 Activating mic during speech for interruption detection");
-      SpeechRecognition.startListening({
-        continuous: true,
-        language: "en-US",
-      });
-    }
-
-    // All sentences complete
     if (index >= sentences.length) {
       isSpeakingRef.current = false;
       setState("listening");
-      console.log("✅ Speech complete - mic should be active");
-
-      // Ensure mic is restarted after speech
-      setTimeout(() => {
-        if (started && !listening) {
-          console.log("🎤 Restarting mic after speech completion");
-          SpeechRecognition.startListening({
-            continuous: true,
-            language: "en-US",
-          });
-        }
-      }, 200);
+      isProcessingRef.current = false;
+      safeStartRecognition();
       return;
     }
 
-    const voices = await loadVoices();
-    const voice = voices.find((v) => v.lang === "en-US") || voices[0];
-
     const utter = new SpeechSynthesisUtterance(sentences[index]);
-    utter.voice = voice;
-    utter.rate = 0.95;
-    utter.pitch = 1.0;
-    utter.volume = 1;
-
     isSpeakingRef.current = true;
     setState("speaking");
-    console.log(`🗣️ Speaking sentence ${index + 1}/${sentences.length}`);
 
     utter.onend = () => {
-      // Check mute before continuing to next sentence
-      if (!muted) {
-        sentenceIndexRef.current += 1;
-        setTimeout(speakNextSentence, 120);
-      } else {
-        console.log("🔇 Muted during speech - stopping");
-        isSpeakingRef.current = false;
-        setState("listening");
-
-        if (started) {
-          setTimeout(() => {
-            SpeechRecognition.startListening({
-              continuous: true,
-              language: "en-US",
-            });
-          }, 100);
-        }
-      }
+      sentenceIndexRef.current++;
+      speakNextSentence();
     };
 
-    utter.onerror = (e) => {
-      console.error("⚠️ Speech error:", e);
+    utter.onerror = () => {
       isSpeakingRef.current = false;
+      isProcessingRef.current = false;
       setState("listening");
-
-      // Restart mic on error
-      if (started) {
-        setTimeout(() => {
-          SpeechRecognition.startListening({
-            continuous: true,
-            language: "en-US",
-          });
-        }, 100);
-      }
+      safeStartRecognition();
     };
 
     speechSynthesis.speak(utter);
   };
 
+  // -------------------- EXPORT --------------------
   return {
-    // State
     started,
     state,
-    aiText,
     conversation,
     muted,
     transcript,
     listening,
     browserSupportsSpeechRecognition,
-
-    // Functions
     startAssistant,
     stopAssistant,
     toggleMute,
